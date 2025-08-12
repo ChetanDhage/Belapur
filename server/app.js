@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -14,17 +13,12 @@ const authRoutes = require("./routes/authRoutes");
 const { errorHandler } = require("./middleware/errorHandler");
 const logger = require("./utils/logger");
 const { protect, restrictTo } = require("./middleware/authMiddleware");
+const { connectDB, checkDBConnection } = require("./db");
 
 const app = express();
 
-// Connect to MongoDB
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => logger.info("MongoDB connected successfully"))
-  .catch((err) => logger.error("MongoDB connection error:", err));
+// Initialize database connection
+connectDB();
 
 // Force HTTPS in production
 if (process.env.NODE_ENV === "production") {
@@ -55,7 +49,7 @@ app.use(
   cors({
     origin: process.env.CLIENT_URL,
     credentials: true,
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
   })
 );
 
@@ -68,12 +62,16 @@ const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: "Too many requests from this IP, please try again later",
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 const bookingLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: "Too many booking attempts from this IP, please try again later",
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use("/api", globalLimiter);
@@ -85,13 +83,20 @@ app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 app.use(cookieParser());
 app.use(compression());
 
+// Database connection check middleware for API routes
+app.use("/api", checkDBConnection);
+
 // Routes
 app.use("/api/tours", tourRoutes);
 app.use("/api/auth", authRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: "healthy" });
+  res.status(200).json({
+    status: "healthy",
+    database:
+      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  });
 });
 
 // Error handling middleware
